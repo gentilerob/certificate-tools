@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, Upload, Check, X, Copy, Eye, EyeOff } from 'lucide-react';
 
 const CertificateApp = () => {
+  const [forge, setForge] = useState(null);
+  const [forgeLoading, setForgeLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('csr');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -37,21 +39,37 @@ const CertificateApp = () => {
   const [extractorPassword, setExtractorPassword] = useState('');
   const [extractedFiles, setExtractedFiles] = useState(null);
 
-  // Load node-forge
-  const loadForge = async () => {
-    if (!window.forge) {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.0/forge.all.min.js';
-      document.head.appendChild(script);
-      return new Promise(resolve => {
-        script.onload = () => resolve();
-      });
-    }
-  };
+  // Load forge on component mount
+  useEffect(() => {
+    const loadForgeLibrary = () => {
+      if (window.forge) {
+        setForge(window.forge);
+        setForgeLoading(false);
+      } else {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.0/forge.all.min.js';
+        script.onload = () => {
+          if (window.forge) {
+            setForge(window.forge);
+            setForgeLoading(false);
+          }
+        };
+        script.onerror = () => {
+          alert('Errore nel caricamento di forge');
+          setForgeLoading(false);
+        };
+        document.head.appendChild(script);
+      }
+    };
+    
+    loadForgeLibrary();
+  }, []);
 
-  const generateCSR = async () => {
-    await loadForge();
-    const forge = window.forge;
+  const generateCSR = () => {
+    if (!forge) {
+      alert('Libreria in caricamento, riprova tra un secondo');
+      return;
+    }
 
     try {
       // Generate keypair
@@ -87,11 +105,14 @@ const CertificateApp = () => {
     a.href = url;
     a.download = filename;
     a.click();
+    window.URL.revokeObjectURL(url);
   };
 
-  const generatePFX = async () => {
-    await loadForge();
-    const forge = window.forge;
+  const generatePFX = () => {
+    if (!forge) {
+      alert('Libreria in caricamento, riprova tra un secondo');
+      return;
+    }
 
     if (!pfxForm.certificateFile || !pfxForm.keyFile || !pfxForm.password) {
       alert('Riempi tutti i campi');
@@ -105,9 +126,39 @@ const CertificateApp = () => {
 
     setPfxLoading(true);
     try {
-      const certPem = await pfxForm.certificateFile.text();
-      const keyPem = await pfxForm.keyFile.text();
+      const certReader = new FileReader();
+      const keyReader = new FileReader();
+      
+      let certPem = '';
+      let keyPem = '';
+      let filesRead = 0;
 
+      certReader.onload = (e) => {
+        certPem = e.target.result;
+        filesRead++;
+        if (filesRead === 2) {
+          createPFX(certPem, keyPem);
+        }
+      };
+
+      keyReader.onload = (e) => {
+        keyPem = e.target.result;
+        filesRead++;
+        if (filesRead === 2) {
+          createPFX(certPem, keyPem);
+        }
+      };
+
+      certReader.readAsText(pfxForm.certificateFile);
+      keyReader.readAsText(pfxForm.keyFile);
+    } catch (error) {
+      alert('Errore: ' + error.message);
+      setPfxLoading(false);
+    }
+  };
+
+  const createPFX = (certPem, keyPem) => {
+    try {
       const cert = forge.pki.certificateFromPem(certPem);
       const key = forge.pki.privateKeyFromPem(keyPem);
 
@@ -121,18 +172,21 @@ const CertificateApp = () => {
       a.href = url;
       a.download = 'certificate.pfx';
       a.click();
+      window.URL.revokeObjectURL(url);
 
       alert('PFX generato con successo!');
+      setPfxLoading(false);
     } catch (error) {
       alert('Errore: ' + error.message);
-    } finally {
       setPfxLoading(false);
     }
   };
 
-  const matchCertificates = async () => {
-    await loadForge();
-    const forge = window.forge;
+  const matchCertificates = () => {
+    if (!forge) {
+      alert('Libreria in caricamento, riprova tra un secondo');
+      return;
+    }
 
     if (!matcherCert || !matcherKey) {
       alert('Carica entrambi i file');
@@ -140,9 +194,38 @@ const CertificateApp = () => {
     }
 
     try {
-      const certPem = await matcherCert.text();
-      const keyPem = await matcherKey.text();
+      const certReader = new FileReader();
+      const keyReader = new FileReader();
+      
+      let certPem = '';
+      let keyPem = '';
+      let filesRead = 0;
 
+      certReader.onload = (e) => {
+        certPem = e.target.result;
+        filesRead++;
+        if (filesRead === 2) {
+          compareCertificates(certPem, keyPem);
+        }
+      };
+
+      keyReader.onload = (e) => {
+        keyPem = e.target.result;
+        filesRead++;
+        if (filesRead === 2) {
+          compareCertificates(certPem, keyPem);
+        }
+      };
+
+      certReader.readAsText(matcherCert);
+      keyReader.readAsText(matcherKey);
+    } catch (error) {
+      alert('Errore: ' + error.message);
+    }
+  };
+
+  const compareCertificates = (certPem, keyPem) => {
+    try {
       const cert = forge.pki.certificateFromPem(certPem);
       const key = forge.pki.privateKeyFromPem(keyPem);
 
@@ -159,9 +242,11 @@ const CertificateApp = () => {
     }
   };
 
-  const extractFromPFX = async () => {
-    await loadForge();
-    const forge = window.forge;
+  const extractFromPFX = () => {
+    if (!forge) {
+      alert('Libreria in caricamento, riprova tra un secondo');
+      return;
+    }
 
     if (!extractorPfx || !extractorPassword) {
       alert('Carica il PFX e inserisci la password');
@@ -169,24 +254,26 @@ const CertificateApp = () => {
     }
 
     try {
-      const pfxData = await extractorPfx.arrayBuffer();
-      const pfxAsn1 = forge.asn1.fromDer(forge.util.createBuffer(pfxData));
-      const p12 = forge.pkcs12.asn1Decode(pfxAsn1, extractorPassword);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const pfxData = new Uint8Array(e.target.result);
+        const pfxAsn1 = forge.asn1.fromDer(forge.util.createBuffer(pfxData));
+        const p12 = forge.pkcs12.asn1Decode(pfxAsn1, extractorPassword);
 
-      let cert = null;
-      let key = null;
+        let cert = null;
+        let key = null;
 
-      // Extract certificate
-      if (p12.bags.certificateBag && p12.bags.certificateBag.length > 0) {
-        cert = forge.pki.certificateToPem(p12.bags.certificateBag[0].cert);
-      }
+        if (p12.bags.certificateBag && p12.bags.certificateBag.length > 0) {
+          cert = forge.pki.certificateToPem(p12.bags.certificateBag[0].cert);
+        }
 
-      // Extract key
-      if (p12.bags.keyBag && p12.bags.keyBag.length > 0) {
-        key = forge.pki.privateKeyToPem(p12.bags.keyBag[0].key);
-      }
+        if (p12.bags.keyBag && p12.bags.keyBag.length > 0) {
+          key = forge.pki.privateKeyToPem(p12.bags.keyBag[0].key);
+        }
 
-      setExtractedFiles({ cert, key });
+        setExtractedFiles({ cert, key });
+      };
+      reader.readAsArrayBuffer(extractorPfx);
     } catch (error) {
       alert('Errore (password errata?): ' + error.message);
     }
@@ -195,6 +282,17 @@ const CertificateApp = () => {
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
   };
+
+  if (forgeLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-slate-900 mb-4"></div>
+          <p className="text-slate-600">Caricamento librerie...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
