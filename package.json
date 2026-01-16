@@ -4,6 +4,7 @@
   "description": "Certificate generation and management tools",
   "private": true,
   "dependencies": {
+    "libsodium": "^0.8.0",
     "lucide-react": "latest",
     "node-forge": "^1.3.3",
     "react": "^18.2.0",
