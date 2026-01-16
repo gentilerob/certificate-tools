@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Download, Upload, Check, X, Copy, Eye, EyeOff } from 'lucide-react';
 
 const CertificateApp = () => {
-  const [forge, setForge] = useState(null);
-  const [forgeLoading, setForgeLoading] = useState(true);
+  const [jsRSA, setJsRSA] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('csr');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -39,60 +39,61 @@ const CertificateApp = () => {
   const [extractorPassword, setExtractorPassword] = useState('');
   const [extractedFiles, setExtractedFiles] = useState(null);
 
-  // Load forge on component mount
+  // Load jsrsasign on mount
   useEffect(() => {
-    const loadForgeLibrary = () => {
-      if (window.forge) {
-        setForge(window.forge);
-        setForgeLoading(false);
-      } else {
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.0/forge.all.min.js';
-        script.onload = () => {
-          if (window.forge) {
-            setForge(window.forge);
-            setForgeLoading(false);
-          }
-        };
-        script.onerror = () => {
-          alert('Errore nel caricamento di forge');
-          setForgeLoading(false);
-        };
-        document.head.appendChild(script);
+    const loadLibrary = async () => {
+      try {
+        const KJUR = await import('jsrsasign');
+        setJsRSA(KJUR);
+        setLoading(false);
+      } catch (error) {
+        console.error('Errore nel caricamento:', error);
+        setLoading(false);
       }
     };
-    
-    loadForgeLibrary();
+    loadLibrary();
   }, []);
 
   const generateCSR = () => {
-    if (!forge) {
+    if (!jsRSA) {
       alert('Libreria in caricamento, riprova tra un secondo');
       return;
     }
 
+    if (!csrForm.cn) {
+      alert('Riempi almeno il Common Name (CN)');
+      return;
+    }
+
     try {
-      // Generate keypair
-      const keypair = forge.pki.rsa.generateKeyPair(parseInt(csrForm.keyLength));
+      const KJUR = jsRSA.default || jsRSA;
+      
+      // Generate RSA key
+      const RSAKey = KJUR.RSAKey;
+      const rsa = new RSAKey();
+      rsa.generateAsync(parseInt(csrForm.keyLength), '10001', () => {
+        const keyPem = rsa.exportPrivateKeyPEM();
 
-      // Create CSR
-      const csr = forge.pki.createCertificationRequest();
-      csr.publicKey = keypair.publicKey;
-      csr.setSubject([
-        { name: 'commonName', value: csrForm.cn },
-        { name: 'organizationName', value: csrForm.o },
-        { name: 'organizationalUnitName', value: csrForm.ou },
-        { name: 'countryName', value: csrForm.c },
-        { name: 'stateOrProvinceName', value: csrForm.st },
-        { name: 'localityName', value: csrForm.l },
-      ]);
-      csr.sign(keypair.privateKey, forge.md.sha256.create());
+        // Create CSR
+        const csrobj = new KJUR.asn1.csr.CertificationRequest({
+          subject: {
+            name: csrForm.cn,
+            C: csrForm.c,
+            ST: csrForm.st,
+            L: csrForm.l,
+            O: csrForm.o,
+            OU: csrForm.ou,
+            CN: csrForm.cn
+          },
+          sbjpubkey: rsa,
+          sigalg: 'sha256WithRSAEncryption',
+          sigkey: rsa
+        });
 
-      const csrPem = forge.pki.certificationRequestToPem(csr);
-      const keyPem = forge.pki.privateKeyToPem(keypair.privateKey);
-
-      setCsrResult(csrPem);
-      setKeyResult(keyPem);
+        const csrPem = csrobj.getPEM();
+        setCsrResult(csrPem);
+        setKeyResult(keyPem);
+      });
     } catch (error) {
       alert('Errore nella generazione: ' + error.message);
     }
@@ -109,7 +110,7 @@ const CertificateApp = () => {
   };
 
   const generatePFX = () => {
-    if (!forge) {
+    if (!jsRSA) {
       alert('Libreria in caricamento, riprova tra un secondo');
       return;
     }
@@ -125,65 +126,74 @@ const CertificateApp = () => {
     }
 
     setPfxLoading(true);
-    try {
-      const certReader = new FileReader();
-      const keyReader = new FileReader();
-      
-      let certPem = '';
-      let keyPem = '';
-      let filesRead = 0;
+    
+    const certReader = new FileReader();
+    const keyReader = new FileReader();
+    
+    let certPem = '';
+    let keyPem = '';
+    let filesRead = 0;
 
-      certReader.onload = (e) => {
-        certPem = e.target.result;
-        filesRead++;
-        if (filesRead === 2) {
-          createPFX(certPem, keyPem);
-        }
-      };
+    const createP12 = () => {
+      try {
+        const KJUR = jsRSA.default || jsRSA;
+        
+        // Parse certificate and key
+        const cert = new KJUR.X509();
+        cert.readCertPEM(certPem);
+        
+        const rsa = new KJUR.RSAKey();
+        rsa.readPrivateKeyFromPEM(keyPem);
 
-      keyReader.onload = (e) => {
-        keyPem = e.target.result;
-        filesRead++;
-        if (filesRead === 2) {
-          createPFX(certPem, keyPem);
-        }
-      };
+        // Create PKCS12
+        const p12 = new KJUR.asn1.pkcs12.PFX({
+          certs: [cert],
+          keys: [rsa],
+          password: pfxForm.password
+        });
 
-      certReader.readAsText(pfxForm.certificateFile);
-      keyReader.readAsText(pfxForm.keyFile);
-    } catch (error) {
-      alert('Errore: ' + error.message);
-      setPfxLoading(false);
-    }
-  };
+        const p12hex = p12.toHex ? p12.toHex() : p12.getPEM();
+        const p12bytes = KJUR.rstrtohex ? 
+          KJUR.rstrtohex(KJUR.hextorstr(p12hex)) : 
+          p12hex;
 
-  const createPFX = (certPem, keyPem) => {
-    try {
-      const cert = forge.pki.certificateFromPem(certPem);
-      const key = forge.pki.privateKeyFromPem(keyPem);
+        // Download PFX
+        const blob = new Blob([new Uint8Array(p12bytes.match(/.{1,2}/g).map(byte => parseInt(byte, 16)))], { 
+          type: 'application/x-pkcs12' 
+        });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'certificate.pfx';
+        a.click();
+        window.URL.revokeObjectURL(url);
 
-      const p12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [cert], pfxForm.password);
-      const p12Der = forge.asn1.toDer(p12Asn1).bytes();
-      const p12b64 = forge.util.encode64(p12Der);
+        alert('PFX generato con successo!');
+        setPfxLoading(false);
+      } catch (error) {
+        alert('Errore nella creazione PFX: ' + error.message);
+        setPfxLoading(false);
+      }
+    };
 
-      const blob = new Blob([forge.util.decode64(p12b64)], { type: 'application/x-pkcs12' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'certificate.pfx';
-      a.click();
-      window.URL.revokeObjectURL(url);
+    certReader.onload = (e) => {
+      certPem = e.target.result;
+      filesRead++;
+      if (filesRead === 2) createP12();
+    };
 
-      alert('PFX generato con successo!');
-      setPfxLoading(false);
-    } catch (error) {
-      alert('Errore: ' + error.message);
-      setPfxLoading(false);
-    }
+    keyReader.onload = (e) => {
+      keyPem = e.target.result;
+      filesRead++;
+      if (filesRead === 2) createP12();
+    };
+
+    certReader.readAsText(pfxForm.certificateFile);
+    keyReader.readAsText(pfxForm.keyFile);
   };
 
   const matchCertificates = () => {
-    if (!forge) {
+    if (!jsRSA) {
       alert('Libreria in caricamento, riprova tra un secondo');
       return;
     }
@@ -193,57 +203,52 @@ const CertificateApp = () => {
       return;
     }
 
-    try {
-      const certReader = new FileReader();
-      const keyReader = new FileReader();
-      
-      let certPem = '';
-      let keyPem = '';
-      let filesRead = 0;
+    const certReader = new FileReader();
+    const keyReader = new FileReader();
+    
+    let certPem = '';
+    let keyPem = '';
+    let filesRead = 0;
 
-      certReader.onload = (e) => {
-        certPem = e.target.result;
-        filesRead++;
-        if (filesRead === 2) {
-          compareCertificates(certPem, keyPem);
-        }
-      };
+    const compare = () => {
+      try {
+        const KJUR = jsRSA.default || jsRSA;
+        
+        const cert = new KJUR.X509();
+        cert.readCertPEM(certPem);
+        
+        const rsa = new KJUR.RSAKey();
+        rsa.readPrivateKeyFromPEM(keyPem);
 
-      keyReader.onload = (e) => {
-        keyPem = e.target.result;
-        filesRead++;
-        if (filesRead === 2) {
-          compareCertificates(certPem, keyPem);
-        }
-      };
+        // Get modulus from both
+        const certModulus = cert.getPublicKeyObject().n.toString();
+        const keyModulus = rsa.n.toString();
 
-      certReader.readAsText(matcherCert);
-      keyReader.readAsText(matcherKey);
-    } catch (error) {
-      alert('Errore: ' + error.message);
-    }
-  };
+        const match = certModulus === keyModulus;
+        setMatchResult(match);
+      } catch (error) {
+        alert('Errore nel confronto: ' + error.message);
+      }
+    };
 
-  const compareCertificates = (certPem, keyPem) => {
-    try {
-      const cert = forge.pki.certificateFromPem(certPem);
-      const key = forge.pki.privateKeyFromPem(keyPem);
+    certReader.onload = (e) => {
+      certPem = e.target.result;
+      filesRead++;
+      if (filesRead === 2) compare();
+    };
 
-      const certPublicKey = cert.publicKey;
-      const keyPublicKey = key.publicKey;
+    keyReader.onload = (e) => {
+      keyPem = e.target.result;
+      filesRead++;
+      if (filesRead === 2) compare();
+    };
 
-      const certModulus = certPublicKey.n.toString();
-      const keyModulus = keyPublicKey.n.toString();
-
-      const match = certModulus === keyModulus;
-      setMatchResult(match);
-    } catch (error) {
-      alert('Errore: ' + error.message);
-    }
+    certReader.readAsText(matcherCert);
+    keyReader.readAsText(matcherKey);
   };
 
   const extractFromPFX = () => {
-    if (!forge) {
+    if (!jsRSA) {
       alert('Libreria in caricamento, riprova tra un secondo');
       return;
     }
@@ -256,26 +261,40 @@ const CertificateApp = () => {
     try {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const pfxData = new Uint8Array(e.target.result);
-        const pfxAsn1 = forge.asn1.fromDer(forge.util.createBuffer(pfxData));
-        const p12 = forge.pkcs12.asn1Decode(pfxAsn1, extractorPassword);
+        try {
+          const KJUR = jsRSA.default || jsRSA;
+          const data = e.target.result;
+          
+          // Parse PKCS12
+          const p12 = new KJUR.asn1.pkcs12.PFX();
+          p12.parseHex(data);
+          
+          const certs = p12.getCerts();
+          const keys = p12.getKeys();
 
-        let cert = null;
-        let key = null;
+          let cert = null;
+          let key = null;
 
-        if (p12.bags.certificateBag && p12.bags.certificateBag.length > 0) {
-          cert = forge.pki.certificateToPem(p12.bags.certificateBag[0].cert);
+          if (certs && certs.length > 0) {
+            cert = certs[0].getPEM ? certs[0].getPEM() : new KJUR.X509(certs[0]).getPEM();
+          }
+
+          if (keys && keys.length > 0) {
+            key = keys[0].exportPrivateKeyPEM ? keys[0].exportPrivateKeyPEM() : keys[0];
+          }
+
+          if (cert && key) {
+            setExtractedFiles({ cert, key });
+          } else {
+            alert('Impossibile estrarre certificato o chiave dal PFX');
+          }
+        } catch (error) {
+          alert('Errore nell\'estrazione (password errata?): ' + error.message);
         }
-
-        if (p12.bags.keyBag && p12.bags.keyBag.length > 0) {
-          key = forge.pki.privateKeyToPem(p12.bags.keyBag[0].key);
-        }
-
-        setExtractedFiles({ cert, key });
       };
       reader.readAsArrayBuffer(extractorPfx);
     } catch (error) {
-      alert('Errore (password errata?): ' + error.message);
+      alert('Errore: ' + error.message);
     }
   };
 
@@ -283,7 +302,7 @@ const CertificateApp = () => {
     navigator.clipboard.writeText(text);
   };
 
-  if (forgeLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
         <div className="text-center">
@@ -406,7 +425,6 @@ const CertificateApp = () => {
               </button>
             </div>
 
-            {/* Results */}
             {csrResult && keyResult && (
               <div className="space-y-4 animate-fadeIn">
                 <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
