@@ -1,3 +1,11 @@
+// Load forge from CDN immediately
+if (typeof window !== 'undefined' && !window.forge) {
+  const script = document.createElement('script');
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.0/forge.all.min.js';
+  script.async = false;
+  document.head.appendChild(script);
+}
+
 import React, { useState } from 'react';
 import { Download, Upload, Check, X, Copy, Eye, EyeOff } from 'lucide-react';
 
