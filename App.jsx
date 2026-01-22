@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Download, Copy, Eye, EyeOff, Trash2, Check, X } from 'lucide-react';
 
 const CertificateApp = () => {
-  const [activeTab, setActiveTab] = useState('csr');
+  const [activeTab, setActiveTab] = useState('history');
   const [showPassword, setShowPassword] = useState(false);
   const [history, setHistory] = useState([]);
-  const [nextTicketNum, setNextTicketNum] = useState(1);
+  
+  // Simulated user
+  const currentUser = 'user@elmec.it';
 
   const [csrForm, setCsrForm] = useState({
     ticketId: '',
@@ -43,38 +45,26 @@ const CertificateApp = () => {
   });
   const [extractedFiles, setExtractedFiles] = useState(null);
 
+  // Load history from localStorage on mount
   useEffect(() => {
     const savedHistory = localStorage.getItem('certificateHistory');
     if (savedHistory) {
       setHistory(JSON.parse(savedHistory));
     }
-    
-    const savedTicketNum = localStorage.getItem('nextTicketNum');
-    if (savedTicketNum) {
-      setNextTicketNum(parseInt(savedTicketNum));
-    }
   }, []);
 
+  // Save history to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('certificateHistory', JSON.stringify(history));
   }, [history]);
 
-  useEffect(() => {
-    localStorage.setItem('nextTicketNum', nextTicketNum.toString());
-  }, [nextTicketNum]);
-
-  const generateTicketId = () => {
-    const ticketId = `T${nextTicketNum}E`;
-    setNextTicketNum(nextTicketNum + 1);
-    return ticketId;
-  };
-
-  const addToHistory = (ticketId, operation, details) => {
+  const addToHistory = (ticketId, operation, commonName) => {
     const entry = {
       id: Date.now(),
       ticketId,
       operation,
-      details,
+      commonName,
+      user: currentUser,
       timestamp: new Date().toLocaleString('it-IT'),
     };
     setHistory([entry, ...history]);
@@ -96,23 +86,23 @@ const CertificateApp = () => {
     }
 
     const csrPem = `-----BEGIN CERTIFICATE REQUEST-----
-MIICpzCCAZcCAQAwYzELMAkGA1UEBhMCIT
+MIICpzCCAZcCAQAwYzELMAkGA1UEBhMC${csrForm.c || 'IT'}
+MRUwEwYDVQQIDAxTdGF0ZU9yUHJvdmluY2UxDjAMBgNVBAcMBUxvY2FsMRAwDgYD
+VQQKDAd0ZXN0IE9yZzEZMBcGA1UEAwwQQ291cmllciB0ZXN0IENBMIIBIjANBgkq
+hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds...
 -----END CERTIFICATE REQUEST-----`;
 
     const keyPem = `-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCB
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRndVLkklx2zUM
+QKxUBf0w5J0rq8JzKK5Q8hK9R8M9R7K5M3...
 -----END PRIVATE KEY-----`;
 
     setCsrResult(csrPem);
     setKeyResult(keyPem);
     
-    addToHistory(
-      csrForm.ticketId,
-      'CSR Generato',
-      `CN: ${csrForm.cn}, Lunghezza: ${csrForm.keyLength} bits`
-    );
+    addToHistory(csrForm.ticketId, 'CSR Creato', csrForm.cn);
 
-    alert('CSR e chiave generati!');
+    alert('CSR e chiave privata generati con successo!');
   };
 
   const downloadFile = (content, filename) => {
@@ -144,12 +134,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCB
     setPfxLoading(true);
 
     setTimeout(() => {
-      addToHistory(
-        pfxForm.ticketId,
-        'PFX Creato',
-        `File: ${pfxForm.certificateFile.name}`
-      );
-      alert('PFX generato!');
+      // Extract CN from filename or use a default
+      const cn = pfxForm.certificateFile?.name || 'Certificato';
+      addToHistory(pfxForm.ticketId, 'PFX Creato', cn);
+      alert('PFX generato con successo!');
       setPfxLoading(false);
     }, 1500);
   };
@@ -167,12 +155,6 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCB
 
     const match = Math.random() > 0.5;
     setMatchResult(match);
-
-    addToHistory(
-      matcherForm.ticketId,
-      'Verifica Match',
-      match ? 'Match trovato ✓' : 'Match non trovato ✗'
-    );
   };
 
   const extractFromPFX = () => {
@@ -195,12 +177,6 @@ MIIEvQIBADANBgkqhkiG9w0BAQ
 -----END PRIVATE KEY-----`;
 
     setExtractedFiles({ cert, key });
-
-    addToHistory(
-      extractorForm.ticketId,
-      'PFX Estratto',
-      `File: ${extractorForm.pfxFile.name}`
-    );
   };
 
   const copyToClipboard = (text) => {
@@ -215,16 +191,19 @@ MIIEvQIBADANBgkqhkiG9w0BAQ
             <div className="w-10 h-10 bg-gradient-to-br from-slate-700 to-slate-900 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-sm">CA</span>
             </div>
-            <h1 className="text-2xl font-light tracking-tight text-slate-900">Certificate Tools</h1>
+            <div>
+              <h1 className="text-2xl font-light tracking-tight text-slate-900">Certificate Tools</h1>
+              <p className="text-xs text-slate-500 mt-1">{currentUser}</p>
+            </div>
           </div>
 
           <div className="flex gap-1 flex-wrap">
             {[
+              { id: 'history', label: 'History', icon: '📋' },
               { id: 'csr', label: 'CSR & Key', icon: '🔑' },
               { id: 'pfx', label: 'PFX Creator', icon: '📦' },
               { id: 'match', label: 'Verify Match', icon: '✓' },
               { id: 'extract', label: 'Extract PFX', icon: '🔓' },
-              { id: 'history', label: 'History', icon: '📋' },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -243,6 +222,48 @@ MIIEvQIBADANBgkqhkiG9w0BAQ
       </div>
 
       <div className="max-w-4xl mx-auto px-6 py-12">
+        {activeTab === 'history' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
+              <h2 className="text-xl font-semibold text-slate-900 mb-8">Storico Operazioni</h2>
+
+              {history.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-slate-500">Nessuna operazione registrata</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {history.map(entry => (
+                    <div key={entry.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-4 mb-2">
+                            <span className="font-mono font-semibold text-slate-900">{entry.ticketId}</span>
+                            <span className="text-sm text-slate-600">{entry.user}</span>
+                            <span className="text-sm font-medium text-slate-700">{entry.commonName}</span>
+                          </div>
+                          <div className="flex items-center gap-3 ml-0">
+                            <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
+                              {entry.operation}
+                            </span>
+                            <span className="text-xs text-slate-400">{entry.timestamp}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => deleteHistoryEntry(entry.id)}
+                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'csr' && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
@@ -464,17 +485,6 @@ MIIEvQIBADANBgkqhkiG9w0BAQ
               <h2 className="text-xl font-semibold text-slate-900 mb-8">Verify Certificate & Key Match</h2>
 
               <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <label className="block text-sm font-medium text-blue-900 mb-2">Ticket ID *</label>
-                  <input
-                    type="text"
-                    placeholder="Es: T123E"
-                    value={matcherForm.ticketId}
-                    onChange={e => setMatcherForm({ ...matcherForm, ticketId: e.target.value.toUpperCase() })}
-                    className="w-full px-4 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 transition"
-                  />
-                </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Certificate File (.crt) *</label>
                   <input
@@ -538,17 +548,6 @@ MIIEvQIBADANBgkqhkiG9w0BAQ
               <h2 className="text-xl font-semibold text-slate-900 mb-8">Extract from PFX</h2>
 
               <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <label className="block text-sm font-medium text-blue-900 mb-2">Ticket ID *</label>
-                  <input
-                    type="text"
-                    placeholder="Es: T123E"
-                    value={extractorForm.ticketId}
-                    onChange={e => setExtractorForm({ ...extractorForm, ticketId: e.target.value.toUpperCase() })}
-                    className="w-full px-4 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 transition"
-                  />
-                </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">PFX File *</label>
                   <input
@@ -637,62 +636,7 @@ MIIEvQIBADANBgkqhkiG9w0BAQ
             </div>
           </div>
         )}
-
-        {activeTab === 'history' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
-              <h2 className="text-xl font-semibold text-slate-900 mb-8">History - Operazioni Pubbliche</h2>
-
-              {history.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-slate-500">Nessuna operazione registrata</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {history.map(entry => (
-                    <div key={entry.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <div className="w-2 h-2 bg-slate-900 rounded-full mt-1.5"></div>
-                          <div>
-                            <p className="font-semibold text-slate-900">
-                              {entry.operation}
-                            </p>
-                            <p className="text-sm text-slate-600">
-                              Ticket: <span className="font-mono font-semibold">{entry.ticketId}</span>
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => deleteHistoryEntry(entry.id)}
-                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                      <p className="text-sm text-slate-600 ml-5 mb-2">{entry.details}</p>
-                      <p className="text-xs text-slate-400 ml-5">{entry.timestamp}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
-
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(8px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
     </div>
   );
 };
